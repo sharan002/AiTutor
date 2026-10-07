@@ -1,0 +1,58 @@
+@title: Python for Beginners
+@language: en-IN
+@code: python
+@instructions: Be encouraging. Use everyday analogies. Keep sentences short.
+
+# Variables
+A variable is a name that stores a value in memory.
+In Python you do not declare a type; you just assign with the equals sign.
+Python figures out whether it is a number, text or something else.
+
+#code#
+name = "Asha"
+age = 21
+print(name, "is", age, "years old")
+#/code#
+
+# Loops
+A for loop repeats a block of code once for every item in a sequence.
+range(5) gives the numbers 0 to 4.
+
+#code#
+for i in range(1, 6):
+    print("Square of", i, "is", i * i)
+#/code#
+
+#code#
+total = 0
+for n in [10, 20, 30]:
+    total += n
+print("Total =", total)
+#/code#
+
+# Variables
+A variable is a name that stores a value in memory.
+In Python you do not declare a type; you just assign with the equals sign.
+Python figures out whether it is a number, text or something else.
+
+#code#
+name = "Asha"
+age = 21
+print(name, "is", age, "years old")
+#/code#
+
+# Loops
+A for loop repeats a block of code once for every item in a sequence.
+range(5) gives the numbers 0 to 4.
+
+#code#
+for i in range(1, 6):
+    print("Square of", i, "is", i * i)
+#/code#
+
+#code#
+total = 0
+for n in [10, 20, 30]:
+    total += n
+print("Total =", total)
+#/code#

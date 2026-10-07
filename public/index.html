@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Tutor Board</title>
+  <link rel="stylesheet" href="board.css" />
+</head>
+<body>
+  <header>
+    <div id="course">AI Tutor</div>
+    <div id="topic"></div>
+    <div id="progress"></div>
+  </header>
+
+  <main>
+    <section id="slide"><h1 id="slideTitle"></h1><div id="slideText"></div></section>
+    <section id="work">
+      <div class="pane code"><div class="bar"><span>CODE</span><span id="lang"></span></div><pre id="code"></pre></div>
+      <div class="pane term"><div class="bar"><span>TERMINAL</span><span id="status"></span></div><pre id="out"></pre></div>
+    </section>
+  </main>
+
+  <div id="ask" hidden></div>
+  <footer id="caption"></footer>
+
+  <!-- Only shown on the trainer's own control page (/?local=1), never on the shared tab. -->
+  <form id="controls" hidden>
+    <button type="button" id="start">▶ Start class (audio plays in this tab)</button>
+    <input id="q" placeholder="Type a doubt and press Enter..." autocomplete="off" />
+  </form>
+  <script src="board.js"></script>
+</body>
+</html>

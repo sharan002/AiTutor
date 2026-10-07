@@ -1,0 +1,25 @@
+{
+  "name": "ai-tutor",
+  "version": "1.0.0",
+  "description": "AI programming trainer: joins Google Meet, shares a code board, teaches a syllabus and answers doubts by voice",
+  "main": "index.js",
+  "scripts": {
+    "teach": "node index.js meet",
+    "preview": "node index.js preview",
+    "login": "node login.js",
+    "test": "node test.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.12.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "form-data": "^4.0.1",
+    "multer": "^2.0.1",
+    "playwright-core": "^1.63.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
