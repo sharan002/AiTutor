@@ -15,7 +15,8 @@ stub("./llm", {
   chat: async (provider, messages) => {
     const last = messages[messages.length - 1].content;
     llmCalls.push(last);
-    return /doubt|why/i.test(last) && messages[0].content.includes("interrupted") ? "Great question. It is clear now. We continue." : "This is a spoken explanation. It has two sentences.";
+    if (messages[0].content.includes("speech-to-text")) return /resolved|clear/i.test(last) ? "[RESOLVED] Great, let us continue." : /^hello/i.test(last) ? "[ASK] Hello! What is your doubt?" : "[ANSWER] Great question. Is it clear now?";
+    return "This is a spoken explanation. It has two sentences.";
   },
 });
 const spoken = [];

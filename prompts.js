@@ -91,20 +91,45 @@ Write in ${lang(l)}. Output only the words to be spoken.`,
   ];
 }
 
-function answerPrompt(l, question, context) {
+const REPLY_TAGS = ["ASK", "ANSWER", "RESOLVED", "CHAT"];
+
+// The doubt-handling model starts its reply with a tag so the tutor knows what to do next.
+function parseReply(reply) {
+  const m = String(reply).match(/^\s*\[?\s*(ASK|ANSWER|RESOLVED|CHAT)\s*\]?\s*[:\-]?\s*/i);
+  return m ? { tag: m[1].toUpperCase(), text: reply.slice(m[0].length) } : { tag: "CHAT", text: String(reply) };
+}
+
+function answerPrompt(l, question, context, awaiting) {
   const history = l.qa.slice(-4).flatMap((q) => [
     { role: "user", content: q.question },
     { role: "assistant", content: q.answer },
   ]);
+  const state =
+    awaiting === "doubt"
+      ? 'You just asked the student what their doubt is, so this message should be the doubt itself.'
+      : awaiting === "confirm"
+      ? "You just answered a doubt and asked whether it is resolved, so this message is probably their reply to that."
+      : "The student spoke up while the class was running (or after you asked if anyone has doubts).";
   return [
     {
       role: "system",
       content: `${persona(l)}
 
-A student interrupted the class with a doubt. The class is currently on topic "${context.topic || l.title}".
+${state} The class is currently on topic "${context.topic || l.title}".
 What you were teaching right now:
-${context.text ? `Notes: ${context.text.slice(0, 700)}\n` : ""}${context.code ? `Code on screen (${context.lang}):\n${context.code.slice(0, 700)}\n` : ""}${context.output ? `Terminal shows:\n${context.output.slice(0, 400)}\n` : ""}
-Answer the doubt directly and clearly (under 130 words), in the same language the student used (default ${lang(l)}). Use a tiny example in words if useful. If it is unrelated to programming or the class, answer very briefly and steer back. Always end by asking if it is clear and saying you will continue.`,
+${context.text ? `Notes: ${context.text.slice(0, 700)}
+` : ""}${context.code ? `Code on screen (${context.lang}):
+${context.code.slice(0, 700)}
+` : ""}${context.output ? `Terminal shows:
+${context.output.slice(0, 400)}
+` : ""}
+The student's words come from speech-to-text and may contain small mistakes; infer what they meant from the lesson.
+Begin your reply with exactly ONE tag in square brackets (it is removed before speaking), then the spoken words:
+[ASK] - the student only greeted you, called for you, or said they have a doubt/question without saying what it is ("hello", "sir", "I have a doubt", "can I ask something"). Reply in one short sentence: welcome them and ask what their doubt is. Do NOT continue the lesson.
+[ANSWER] - they asked an actual doubt, or said they did NOT understand / it is NOT resolved. Answer directly and clearly (under 90 words); if they said it was not clear, explain it differently with a simpler example. ALWAYS end by asking whether the doubt is clear now / resolved.
+[RESOLVED] - they confirm it is clear, say thanks, or say they have no (more) doubts. Reply in one short friendly sentence saying you will continue the class.
+[CHAT] - anything else (unrelated remark, or a very brief off-topic question): answer in one or two short sentences and steer back to the class.
+Reply in the language the student used (default ${lang(l)}).`,
     },
     ...history,
     { role: "user", content: question },
@@ -118,4 +143,4 @@ function closingPrompt(l) {
   ];
 }
 
-module.exports = { LANGUAGES, openingPrompt, textPrompt, codeIntroPrompt, codeOutputPrompt, answerPrompt, closingPrompt };
+module.exports = { LANGUAGES, openingPrompt, textPrompt, codeIntroPrompt, codeOutputPrompt, answerPrompt, parseReply, closingPrompt };

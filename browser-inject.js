@@ -6,7 +6,7 @@
 (() => {
   if (window.__tutorInstalled) return;
   window.__tutorInstalled = true;
-  const cfg = Object.assign({ thresh: 0.012, silenceMs: 1200, minMs: 500, maxMs: 30000 }, window.__tutorCfg || {});
+  const cfg = Object.assign({ thresh: 0.012, silenceMs: 900, minMs: 500, maxMs: 30000 }, window.__tutorCfg || {});
   const AC = window.AudioContext || window.webkitAudioContext;
 
   // ── virtual microphone ───────────────────────────────────────────────────────
@@ -83,8 +83,12 @@
     const ratio = rate / 16000;
     const n = Math.floor(all.length / ratio);
     const pcm = new Int16Array(n);
+    // Average each input window (a cheap low-pass) instead of dropping samples: avoids aliasing, which hurts STT.
     for (let i = 0; i < n; i++) {
-      const v = Math.max(-1, Math.min(1, all[Math.floor(i * ratio)]));
+      const a = Math.floor(i * ratio), b = Math.max(a + 1, Math.min(all.length, Math.floor((i + 1) * ratio)));
+      let acc = 0;
+      for (let j = a; j < b; j++) acc += all[j];
+      const v = Math.max(-1, Math.min(1, acc / (b - a)));
       pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
     }
     const buf = new ArrayBuffer(44 + pcm.length * 2);
@@ -147,7 +151,7 @@
         if (now - lastVoice > cfg.silenceMs || now - speechStart > cfg.maxMs) finish();
       } else {
         pre.push(copy);
-        if (pre.length > 3) pre.shift();
+        if (pre.length > 6) pre.shift();
       }
     };
   }

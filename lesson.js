@@ -16,6 +16,10 @@ const P = require("./prompts");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DOUBT_WAIT_MS = (Number(process.env.TUTOR_DOUBT_WAIT_SEC) || 8) * 1000;
 const TYPE_MS_PER_CHAR = 30;
+// After the student stops talking, wait this long for more speech before treating it as one finished question.
+const SETTLE_MS = Number(process.env.TUTOR_SETTLE_MS) || 700;
+// After "what is your doubt?" / "is it clear?", how long to wait for the student's reply.
+const FOLLOWUP_MS = (Number(process.env.TUTOR_FOLLOWUP_WAIT_SEC) || 15) * 1000;
 
 class Tutor {
   constructor({ syllabus, sink, board, provider, language, progressFile, restart }) {
@@ -35,6 +39,9 @@ class Tutor {
     this.pos = restart ? 0 : this.loadProgress();
     this.questions = [];
     this.hold = null; // Promise while a student is speaking / being transcribed
+    this.pending = 0; // utterances detected but not yet transcribed
+    this.partial = ""; // transcribed text of the question being spoken (may span several utterances)
+    this.awaiting = null; // null | "doubt" (asked what the doubt is) | "confirm" (asked if it is resolved)
     this.aborted = false;
     this._ttsFails = 0;
     this.scripts = new Map();
@@ -67,32 +74,51 @@ class Tutor {
   }
 
   // ── student input ───────────────────────────────────────────────────────────
-  // Someone started talking in the meeting: stop immediately and wait for the transcript.
+  // Someone started talking in the meeting: stop immediately and hold the lesson until every
+  // utterance is transcribed and the student has finished (pauses mid-sentence are merged).
   onVoiceStart() {
     this.sink.stop();
-    if (this.hold) return;
-    this.hold = new Promise((r) => (this.releaseHold = r));
-    this.holdTimer = setTimeout(() => this.release(), 30000);
+    clearTimeout(this.settleTimer);
+    this.pending++;
+    if (!this.hold) this.hold = new Promise((r) => (this.releaseHold = r));
+    clearTimeout(this.holdTimer);
+    this.holdTimer = setTimeout(() => {
+      this.pending = 0;
+      this.flush();
+    }, 30000);
+  }
+  flush() {
+    if (this.partial) this.questions.push(this.partial);
+    this.partial = "";
+    this.release();
   }
   release() {
     clearTimeout(this.holdTimer);
+    clearTimeout(this.settleTimer);
     const r = this.releaseHold;
     this.hold = null;
     r?.();
   }
   async onSpeech(buffer, filename = "speech.wav") {
     let text = "";
-    try {
-      text = (await transcribe(buffer, filename, this.lesson.language)).trim();
-    } catch (e) {
-      console.error("stt error:", e.response?.data || e.message);
+    for (let attempt = 0; attempt < 2 && !text; attempt++) {
+      try {
+        text = (await transcribe(buffer, filename, this.lesson.language)).trim();
+        break;
+      } catch (e) {
+        console.error("stt error:", e.response?.data || e.message);
+      }
     }
-    // Ignore noise / one-word fragments.
-    if (text.replace(/[^\p{L}\p{N}]/gu, "").length >= 4) {
+    this.pending = Math.max(0, this.pending - 1);
+    // Ignore noise, but keep short replies like "yes" / "no".
+    if (text.replace(/[^\p{L}\p{N}]/gu, "").length >= 2) {
       console.log(`❓ heard: ${text}`);
-      this.questions.push(text);
+      this.partial = `${this.partial} ${text}`.trim();
     }
-    this.release();
+    if (this.pending === 0) {
+      clearTimeout(this.settleTimer);
+      this.settleTimer = setTimeout(() => this.flush(), SETTLE_MS);
+    }
   }
   onQuestion(text) {
     console.log(`❓ typed: ${text}`);
@@ -107,7 +133,9 @@ class Tutor {
 
   // ── speaking ────────────────────────────────────────────────────────────────
   // retry=true: lesson speech - if interrupted, answer the doubt, then replay the
-  // interrupted chunk. retry=false: an answer - if interrupted, just stop.
+  // interrupted chunk. retry=false: an answer - if interrupted, wait for the student;
+  // a new question takes over, otherwise (just noise) the chunk is replayed.
+  // Returns true if everything was spoken.
   async speak(chunks, { retry = true } = {}) {
     const audio = new Map();
     const get = (i) => {
@@ -116,6 +144,7 @@ class Tutor {
     };
     for (let i = 0; i < chunks.length && !this.aborted; ) {
       await this.hold;
+      if (!retry && this.questions.length) return false;
       if (retry && this.questions.length) await this.drain();
       if (this.hold || this.aborted) continue;
       get(i + 1); // prefetch the next chunk's audio
@@ -125,7 +154,7 @@ class Tutor {
       } catch (e) {
         console.error("tts error:", e.response?.data || e.message);
         audio.delete(i);
-        if (++this._ttsFails > 3) return;
+        if (++this._ttsFails > 3) return false;
         await sleep(1500);
         continue;
       }
@@ -136,27 +165,52 @@ class Tutor {
       if (r === "done") {
         i++;
         this.lesson.lastSpoken = chunks[i - 1];
-      } else if (!retry) return;
+      }
     }
+    return !this.aborted;
   }
 
-  // Answer every queued doubt.
+  // Wait for the student to reply to "what is your doubt?" / "is it clear?".
+  async waitForStudent() {
+    const end = Date.now() + FOLLOWUP_MS;
+    while (Date.now() < end && !this.aborted && !this.hold && !this.questions.length) await sleep(200);
+    await this.hold;
+  }
+
+  // Answer every queued doubt, one at a time, in the order asked.
   async drain() {
     while (!this.aborted) {
       await this.hold;
       const q = this.questions.shift();
       if (!q) return;
       this.board.set("ask", { q, at: Date.now() });
-      let answer;
+      let reply;
       try {
-        answer = plainSpeech(await chat(this.lesson.provider, P.answerPrompt(this.lesson, q, this.current), { maxTokens: 700 }));
+        reply = await chat(this.lesson.provider, P.answerPrompt(this.lesson, q, this.current, this.awaiting), { maxTokens: 450 });
       } catch (e) {
         console.error("answer error:", e.response?.data || e.message);
         continue;
       }
-      this.lesson.qa.push({ question: q, answer });
-      await this.speak(toChunks(answer), { retry: false });
+      // The student said more while we were thinking: answer it all together, not a stale reply.
+      await this.hold;
+      if (this.questions.length) {
+        this.questions[0] = `${q} ${this.questions[0]}`;
+        continue;
+      }
+      const { tag, text } = P.parseReply(reply);
+      const answer = plainSpeech(text);
+      if (!answer) continue;
+      this.awaiting = tag === "ASK" ? "doubt" : tag === "ANSWER" ? "confirm" : null;
+      if (tag === "ANSWER" || tag === "CHAT") this.lesson.qa.push({ question: q, answer });
+      const done = await this.speak(toChunks(answer), { retry: false });
       this.board.set("ask", null);
+      if (done && this.awaiting) {
+        await this.waitForStudent();
+        // No reply: treat the doubt as resolved and carry on with the lesson.
+        if (!this.questions.length) this.awaiting = null;
+      } else if (!done && !this.questions.length) {
+        this.awaiting = null;
+      }
     }
   }
 

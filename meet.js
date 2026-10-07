@@ -54,7 +54,7 @@ class MeetSession extends EventEmitter {
     });
     const vad = {
       thresh: Number(process.env.TUTOR_VAD_THRESHOLD) || 0.012,
-      silenceMs: Number(process.env.TUTOR_VAD_SILENCE_MS) || 1200,
+      silenceMs: Number(process.env.TUTOR_VAD_SILENCE_MS) || 900,
     };
     await this.context.addInitScript(`window.__tutorCfg = ${JSON.stringify(vad)};`);
     await this.context.addInitScript({ path: path.join(__dirname, "browser-inject.js") });
