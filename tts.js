@@ -1,8 +1,8 @@
 // ─── TTS / STT provider switch ───────────────────────────────────────────────
 // Comment one line out and un-comment the other to switch engines.
 // (Setting TUTOR_TTS_PROVIDER in the env overrides this without touching code.)
-const TTS_PROVIDER = "sarvam"; // Bulbul - understands Tamil well
-// const TTS_PROVIDER = "cartesia"; // Sonic - uses CARTESIA_* from the shared .env
+// const TTS_PROVIDER = "sarvam"; // Bulbul - understands Tamil well
+const TTS_PROVIDER = "cartesia"; // Sonic - uses CARTESIA_* from the shared .env
 
 // Speech-to-text is always Sarvam (Saaras) - see sarvam.js.
 // ─────────────────────────────────────────────────────────────────────────────

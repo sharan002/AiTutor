@@ -48,6 +48,33 @@ function pushText(blocks, topic, lines) {
   flush();
 }
 
+// ── language detection ─────────────────────────────────────────────────────────
+// Native scripts map straight to a language; romanised Tamil ("Tanglish") is spotted by common words.
+const SCRIPTS = [
+  ["ta-IN", /[஀-௿]/g],
+  ["hi-IN", /[ऀ-ॿ]/g],
+  ["te-IN", /[ఀ-౿]/g],
+  ["kn-IN", /[ಀ-೿]/g],
+  ["ml-IN", /[ഀ-ൿ]/g],
+];
+const TANGLISH = new Set(
+  ("la na oru panni pannum panna pannunga pannalam vaikkira vendiyadhilla vendam vendiya podhum vachu adhu idhu illa vera edhavadha nnu thaane " +
+    "kandupidichukkum irukku irukkum irukkura enna ennanu inga anga nalla romba seiyalam paarunga sollunga nama naama ungalukku namakku innum ippo " +
+    "epdi apdi mudiyum theriyum varum kudukkum kudutha aana aanaa pola mathiri kooda mattum ellam ellaam oru-thadava thadava").split(" ")
+);
+
+// Returns a language code ("ta-IN", ...) or null when the text is plain English / unknown.
+function detectLanguage(text) {
+  const s = String(text || "");
+  for (const [code, re] of SCRIPTS) {
+    const n = (s.match(re) || []).length;
+    if (n >= 3) return code;
+  }
+  const words = s.toLowerCase().match(/[a-z]+/g) || [];
+  const hits = words.filter((w) => TANGLISH.has(w));
+  return new Set(hits).size >= 2 && hits.length / words.length >= 0.04 ? "ta-IN" : null;
+}
+
 function parseSyllabus(raw, fileName = "") {
   const lines = String(raw).replace(/^﻿/, "").replace(/\r/g, "").split("\n");
   const meta = {};
@@ -100,6 +127,19 @@ function parseSyllabus(raw, fileName = "") {
   const codeLang = normLang(meta.code || meta.codelanguage || base);
   for (const b of blocks) if (b.type === "code") b.lang = b.lang || codeLang || "python";
 
+  // Detected language per block (code blocks follow the notes before them); null = no detection.
+  let prev = null;
+  const votes = {};
+  for (const b of blocks) {
+    if (b.type === "text") {
+      b.detectedLanguage = detectLanguage(b.text);
+      prev = b.detectedLanguage;
+      const k = b.detectedLanguage || "";
+      votes[k] = (votes[k] || 0) + b.words;
+    } else b.detectedLanguage = prev;
+  }
+  const dominant = Object.entries(votes).filter(([k]) => k).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+
   const topics = [];
   blocks.forEach((b, i) => {
     b.index = i;
@@ -109,6 +149,7 @@ function parseSyllabus(raw, fileName = "") {
   return {
     title: meta.title || (base ? base[0].toUpperCase() + base.slice(1) : "Programming class"),
     language: meta.language || null,
+    detectedLanguage: dominant,
     codeLang: codeLang || "python",
     instructions: meta.instructions || "",
     topics,
@@ -116,4 +157,4 @@ function parseSyllabus(raw, fileName = "") {
   };
 }
 
-module.exports = { parseSyllabus, normLang };
+module.exports = { parseSyllabus, normLang, detectLanguage };

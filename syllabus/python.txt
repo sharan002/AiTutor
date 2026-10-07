@@ -4,9 +4,10 @@
 @instructions: Be encouraging. Use everyday analogies. Keep sentences short.
 
 # Variables
-A variable is a name that stores a value in memory.
-In Python you do not declare a type; you just assign with the equals sign.
-Python figures out whether it is a number, text or something else.
+
+Variable-na, memory-la oru value-a store panni vaikkira oru peru.
+Python-la type-a declare panna vendiyadhilla; equals sign vachu assign panna podhum.
+Adhu number-aa, text-aa, illa vera edhavadha-nnu Python thaane kandupidichukkum.
 
 #code#
 name = "Asha"
@@ -15,8 +16,8 @@ print(name, "is", age, "years old")
 #/code#
 
 # Loops
-A for loop repeats a block of code once for every item in a sequence.
-range(5) gives the numbers 0 to 4.
+For loop-னா, ஒரு sequence-ல இருக்கிற ஒவ்வொரு item-க்கும் ஒரு block of code-அ ஒரு தடவை repeat பண்ணும்.
+range(5) குடுத்தா, zero-ல இருந்து four வரைக்கும் numbers கிடைக்கும்.
 
 #code#
 for i in range(1, 6):

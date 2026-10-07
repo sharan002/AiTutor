@@ -45,7 +45,11 @@ async function main() {
   if (mode === "meet" && !/^https:\/\/meet\.google\.com\/[a-z-]+/i.test(url || "")) throw new Error("First argument must be a https://meet.google.com/xxx-xxxx-xxx link.");
 
   const syllabus = parseSyllabus(fs.readFileSync(file, "utf8"), file);
-  const language = flags.lang || syllabus.language || process.env.SARVAM_STT_LANGUAGE || "ta-IN";
+  // An explicit --lang wins; otherwise the language detected in the notes beats the @language header.
+  const autoLanguage = !flags.lang;
+  const language = flags.lang || syllabus.detectedLanguage || syllabus.language || process.env.SARVAM_STT_LANGUAGE || "ta-IN";
+  if (autoLanguage && syllabus.detectedLanguage && syllabus.language && syllabus.language !== syllabus.detectedLanguage)
+    console.warn(`⚠️  Syllabus says @language: ${syllabus.language} but its notes look ${syllabus.detectedLanguage} - teaching each block in its detected language.`);
   if (!LANGUAGES[language]) console.warn(`⚠️  Unknown language "${language}" - the LLM will be told to use it as-is.`);
   const provider = flags.provider || process.env.TUTOR_LLM_PROVIDER || "sarvam";
   const base = path.basename(file).replace(/\.[^.]+$/, "");
@@ -72,7 +76,7 @@ async function main() {
     await meet.launch();
   }
 
-  tutor = new Tutor({ syllabus, sink, board, provider, language, progressFile, restart: !!flags.restart });
+  tutor = new Tutor({ syllabus, sink, board, provider, language, autoLanguage, progressFile, restart: !!flags.restart });
 
   if (meet) {
     meet.on("voice", () => tutor.onVoiceStart());

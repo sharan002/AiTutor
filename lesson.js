@@ -22,8 +22,10 @@ const SETTLE_MS = Number(process.env.TUTOR_SETTLE_MS) || 700;
 const FOLLOWUP_MS = (Number(process.env.TUTOR_FOLLOWUP_WAIT_SEC) || 15) * 1000;
 
 class Tutor {
-  constructor({ syllabus, sink, board, provider, language, progressFile, restart }) {
+  constructor({ syllabus, sink, board, provider, language, autoLanguage = false, progressFile, restart }) {
     this.syllabus = syllabus;
+    this.autoLanguage = autoLanguage;
+    this.baseLanguage = language;
     this.sink = sink;
     this.board = board;
     this.progressFile = progressFile;
@@ -228,11 +230,16 @@ class Tutor {
   }
 
   // ── LLM scripts (prefetched one block ahead) ───────────────────────────────
+  // Language a block is taught in: its detected language (Tamil / Tanglish / ...) unless --lang was forced.
+  langOf(b) {
+    return (this.autoLanguage && b.detectedLanguage) || this.baseLanguage;
+  }
   script(i) {
     if (!this.scripts.has(i)) {
       const b = this.syllabus.blocks[i];
       const endOfTopic = this.endsTopic(i) ? b.topic || this.lesson.title : null;
-      const messages = b.type === "text" ? P.textPrompt(this.lesson, b, { endOfTopic }) : P.codeIntroPrompt(this.lesson, b);
+      const l = { ...this.lesson, language: this.langOf(b) };
+      const messages = b.type === "text" ? P.textPrompt(l, b, { endOfTopic }) : P.codeIntroPrompt(l, b);
       const fallback = b.type === "text" ? b.text : "";
       this.scripts.set(i, this.generate(messages, fallback));
     }
@@ -267,6 +274,7 @@ class Tutor {
   }
 
   async teachText(b) {
+    this.lesson.language = this.langOf(b); // used by TTS, STT and doubt answers while this block plays
     this.current = { topic: b.topic, text: b.text };
     this.board.set("code", null);
     this.board.set("output", null);
@@ -276,6 +284,7 @@ class Tutor {
   }
 
   async teachCode(b) {
+    this.lesson.language = this.langOf(b);
     this.current = { ...this.current, topic: b.topic, code: b.code, lang: b.lang, output: "" };
     this.showSection({ ...b, text: "" });
     this.board.set("output", null);
