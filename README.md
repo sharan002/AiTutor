@@ -10,7 +10,7 @@ npm test                                   # offline self-test (no keys, no Meet
 npm run login                              # once: sign in the trainer's Google account (optional, see below)
 npm run preview -- python.txt              # try a lesson without Meet: open http://localhost:7100/?local=1
 npm run teach -- https://meet.google.com/hhs-yvpi-ywe python.txt
-npm run teach -- https://meet.google.com/hhs-yvpi-ywe python.txt -- --restart   # ignore saved progress, start from block 1
+npm run teach -- https://meet.google.com/zjd-urws-zmu python.txt -- --restart   # ignore saved progress, start from block 1
 ```
 
 Reads `../.env` (Sarvam keys etc. - same as before). Needs Chrome, plus whatever compilers/interpreters your

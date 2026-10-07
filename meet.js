@@ -58,7 +58,11 @@ class MeetSession extends EventEmitter {
     };
     await this.context.addInitScript(`window.__tutorCfg = ${JSON.stringify(vad)};`);
     await this.context.addInitScript({ path: path.join(__dirname, "browser-inject.js") });
-    await this.context.exposeFunction("__tutorVoice", () => this.emit("voice"));
+    if (process.env.TUTOR_DEBUG_AUDIO) await this.context.exposeFunction("__tutorDebug", (m) => console.log("🎧", m));
+    await this.context.exposeFunction("__tutorVoice", () => {
+      if (process.env.TUTOR_DEBUG_AUDIO) console.log("🎤 voice detected");
+      this.emit("voice");
+    });
     await this.context.exposeFunction("__tutorSpeech", (b64) => this.emit("speech", Buffer.from(b64, "base64")));
     this.meetPage = this.context.pages()[0] || (await this.context.newPage());
   }
@@ -86,12 +90,30 @@ class MeetSession extends EventEmitter {
     await this.clickIf(p.locator('[role="button"][aria-label*="Turn off camera" i]'), 2500);
     await this.clickIf(p.locator('[role="button"][aria-label*="Turn on microphone" i]'), 2500);
 
-    const joined = await this.clickIf(p.getByRole("button", { name: /^(join now|ask to join|switch here)/i }), 8000);
-    if (!joined) throw new Error('Could not find the "Join now / Ask to join" button. Is the link valid and are you signed in (npm run login)?');
+    const inCall = p.locator('[aria-label*="Leave call" i]');
+    const joined =
+      (await inCall.first().isVisible().catch(() => false)) ||
+      (await this.clickIf(p.getByRole("button", { name: /^(join now|ask to join|switch here)/i }), 15000)) ||
+      (await inCall.first().isVisible().catch(() => false));
+    if (!joined) {
+      const shot = path.join(__dirname, "join-error.png");
+      await p.screenshot({ path: shot }).catch(() => {});
+      const body = (await p.locator("body").innerText().catch(() => "")).replace(/\s+/g, " ").slice(0, 300);
+      throw new Error(
+        `Could not find the "Join now / Ask to join" button. Meet says: "${body}". Screenshot: ${shot}. ` +
+          "Check the link is valid, the trainer account is signed in (npm run login, then CLOSE that window), and the meeting allows this account."
+      );
+    }
     console.log("⏳ Waiting for the host to admit the trainer... (admit it from your Meet window)");
 
     const leave = p.locator('[aria-label*="Leave call" i]');
-    await leave.first().waitFor({ timeout: (Number(process.env.MEET_ADMIT_TIMEOUT_MIN) || 10) * 60000 });
+    const denied = p.getByText(/denied your request|removed from the meeting|can't join this video call/i);
+    const outcome = await Promise.race([
+      leave.first().waitFor({ timeout: (Number(process.env.MEET_ADMIT_TIMEOUT_MIN) || 10) * 60000 }).then(() => "in", () => "timeout"),
+      denied.first().waitFor({ timeout: (Number(process.env.MEET_ADMIT_TIMEOUT_MIN) || 10) * 60000 }).then(() => "denied", () => "timeout"),
+    ]);
+    if (outcome === "timeout") throw new Error("Timed out waiting to be admitted.");
+    if (outcome === "denied") throw new Error("The host denied entry (or the meeting blocked this account). Admit the trainer from the host's Meet window.");
     console.log("✅ In the meeting.");
     await sleep(1500);
     await this.clickIf(p.locator('[role="button"][aria-label*="Turn on microphone" i]'), 1500); // make sure mic is live

@@ -83,7 +83,7 @@ class Tutor {
   async onSpeech(buffer, filename = "speech.wav") {
     let text = "";
     try {
-      text = (await transcribe(buffer, filename, process.env.SARVAM_STT_LANGUAGE)).trim();
+      text = (await transcribe(buffer, filename, this.lesson.language)).trim();
     } catch (e) {
       console.error("stt error:", e.response?.data || e.message);
     }

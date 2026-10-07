@@ -72,6 +72,7 @@
   const seen = new Set();
   let inSpeech = false, speechStart = 0, lastVoice = 0, signalled = false;
   let frames = [], pre = [];
+  let peak = 0, lastLog = 0;
 
   function toWav16k(parts, rate) {
     let len = 0;
@@ -121,6 +122,12 @@
       for (let i = 0; i < x.length; i++) sum += x[i] * x[i];
       const rms = Math.sqrt(sum / x.length);
       const now = performance.now();
+      if (rms > peak) peak = rms;
+      if (window.__tutorDebug && now - lastLog > 3000) {
+        window.__tutorDebug("remote audio level peak=" + peak.toFixed(4) + " (threshold " + cfg.thresh + ")");
+        peak = 0;
+        lastLog = now;
+      }
       const copy = new Float32Array(x);
       if (rms > cfg.thresh) {
         lastVoice = now;
@@ -150,7 +157,17 @@
     seen.add(track.id);
     ensureListening();
     if (lctx.state === "suspended") lctx.resume();
-    lctx.createMediaStreamSource(new MediaStream([track])).connect(mix);
+    const stream = new MediaStream([track]);
+    // Chromium delivers silence from a remote WebRTC track to WebAudio unless the stream
+    // is also attached to a media element, so attach a muted one.
+    try {
+      const el = new Audio();
+      el.muted = true;
+      el.srcObject = stream;
+      el.play().catch(() => {});
+    } catch {}
+    lctx.createMediaStreamSource(stream).connect(mix);
+    if (window.__tutorDebug) window.__tutorDebug("remote audio track attached: " + track.id);
   }
 
   const OrigPC = window.RTCPeerConnection;
