@@ -12,6 +12,7 @@ const tts = require("./tts");
 const { runCode } = require("./runner");
 const { plainSpeech, toChunks } = require("./speech");
 const P = require("./prompts");
+const tools = require("./tools");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DOUBT_WAIT_MS = (Number(process.env.TUTOR_DOUBT_WAIT_SEC) || 8) * 1000;
@@ -187,24 +188,39 @@ class Tutor {
       if (!q) return;
       this.board.set("ask", { q, at: Date.now() });
       let reply;
+      // Agent mode: for "explain step by step" / "not clear" doubts, pick visual aids (a VS Code example that is
+      // run, a Paint diagram). They open now and are closed again once the explanation is spoken.
+      const actions = await tools.plan(this.lesson.provider, this.lesson.language, q, this.current);
+      const shown = actions.length ? await tools.execute(actions) : "";
+      const closeAids = async () => {
+        if (await tools.close()) await this.sink.focus?.(); // back to the meeting tab
+      };
       try {
-        reply = await chat(this.lesson.provider, P.answerPrompt(this.lesson, q, this.current, this.awaiting), { maxTokens: 450 });
+        reply = await chat(this.lesson.provider, P.answerPrompt(this.lesson, q, this.current, this.awaiting, shown), {
+          maxTokens: shown ? 700 : 450,
+        });
       } catch (e) {
         console.error("answer error:", e.response?.data || e.message);
+        await closeAids();
         continue;
       }
       // The student said more while we were thinking: answer it all together, not a stale reply.
       await this.hold;
       if (this.questions.length) {
+        await closeAids();
         this.questions[0] = `${q} ${this.questions[0]}`;
         continue;
       }
       const { tag, text } = P.parseReply(reply);
       const answer = plainSpeech(text);
-      if (!answer) continue;
+      if (!answer) {
+        await closeAids();
+        continue;
+      }
       this.awaiting = tag === "ASK" ? "doubt" : tag === "ANSWER" ? "confirm" : null;
       if (tag === "ANSWER" || tag === "CHAT") this.lesson.qa.push({ question: q, answer });
       const done = await this.speak(toChunks(answer), { retry: false });
+      await closeAids();
       this.board.set("ask", null);
       if (done && this.awaiting) {
         await this.waitForStudent();

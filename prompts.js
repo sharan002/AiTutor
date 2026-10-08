@@ -99,7 +99,7 @@ function parseReply(reply) {
   return m ? { tag: m[1].toUpperCase(), text: reply.slice(m[0].length) } : { tag: "CHAT", text: String(reply) };
 }
 
-function answerPrompt(l, question, context, awaiting) {
+function answerPrompt(l, question, context, awaiting, visual = "") {
   const history = l.qa.slice(-4).flatMap((q) => [
     { role: "user", content: q.question },
     { role: "assistant", content: q.answer },
@@ -129,7 +129,7 @@ Begin your reply with exactly ONE tag in square brackets (it is removed before s
 [ANSWER] - they asked an actual doubt, or said they did NOT understand / it is NOT resolved. Answer directly and clearly (under 90 words); if they said it was not clear, explain it differently with a simpler example. ALWAYS end by asking whether the doubt is clear now / resolved.
 [RESOLVED] - they confirm it is clear, say thanks, or say they have no (more) doubts. Reply in one short friendly sentence saying you will continue the class.
 [CHAT] - anything else (unrelated remark, or a very brief off-topic question): answer in one or two short sentences and steer back to the class.
-Reply in the language the student used (default ${lang(l)}).`,
+${visual ? `\nYou have just put this on the shared screen for the student (they see it while you speak):\n${visual}\nWhen you answer, walk through it step by step in plain spoken words ("first... then... finally..."), pointing to the screen. For this reply you may use up to 160 words instead of 90.\n` : ""}Reply in the language the student used (default ${lang(l)}).`,
     },
     ...history,
     { role: "user", content: question },

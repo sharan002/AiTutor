@@ -154,6 +154,11 @@ class MeetSession extends EventEmitter {
     return ok;
   }
 
+  // Bring the meeting tab back to the front (after the tutor closed a demo window).
+  async focus() {
+    await this.meetPage?.bringToFront().catch(() => {});
+  }
+
   // ── audio sink for the Tutor ────────────────────────────────────────────────
   async play(mp3) {
     const token = { stopped: false };

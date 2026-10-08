@@ -10,7 +10,7 @@ npm test                                   # offline self-test (no keys, no Meet
 npm run login                              # once: sign in the trainer's Google account (optional, see below)
 npm run preview -- python.txt              # try a lesson without Meet: open http://localhost:7100/?local=1
 npm run teach -- https://meet.google.com/hhs-yvpi-ywe python.txt
-npm run teach -- https://meet.google.com/thm-uvbp-wno python.txt -- --restart   # ignore saved progress, start from block 1
+npm run teach -- https://meet.google.com/sab-wqfh-kdv python.txt -- --restart   # ignore saved progress, start from block 1
 ```
 
 Reads `../.env` (Sarvam keys etc. - same as before). Needs Chrome, plus whatever compilers/interpreters your
@@ -62,3 +62,16 @@ Code language defaults to the file name (`python.txt` -> python). You can append
 - Use headphones on the host side, otherwise the trainer's voice can echo back through your mic and look like an interruption.
 - Files: `index.js` CLI - `lesson.js` teaching engine - `syllabus.js` parser - `runner.js` code execution -
   `meet.js` + `browser-inject.js` Meet automation - `board.js`/`server.js`/`public/` the shared screen.
+
+## Agent tools (Windows)
+When a student asks to "explain step by step", draw/show something, or says it is not clear (English, Tanglish or Tamil),
+the tutor decides what helps and puts it on screen while it explains aloud:
+- **VS Code**: a short commented example (the syllabus code if it fits, otherwise a new one, e.g. for "explain functions") is
+  written to a demo folder, opened in its own VS Code window, run, and the output is added to the file as comments.
+- **Paint**: a flow diagram (PNG).
+
+When the explanation ends the VS Code window is closed and the Meet tab is brought back to the front. The demo VS Code uses its
+own profile, so your own VS Code windows are never closed. Only these whitelisted actions exist - the LLM never runs commands.
+Settings: `TUTOR_TOOLS=off` disables it; `TUTOR_VSCODE_DIR` (demo folder, default `tools-output/vscode-demo`),
+`TUTOR_VSCODE_PATH`, `TUTOR_PAINT_PATH`. The code runs with the same interpreters as the syllabus code (python, node, java, gcc).
+Share your **entire screen** in Meet so students can see these windows.
