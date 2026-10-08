@@ -28,11 +28,18 @@ const WANTS_VISUAL = new RegExp(
 );
 const wantsVisual = (q) => enabled() && WANTS_VISUAL.test(q);
 
+// Explicit trigger words (also usable for testing). The LLM is told it MUST use the matching tool.
+//   Paint:   "draw", "diagram", "flow", "flowchart", "paint"      e.g. "open paint and draw the flow of a for loop"
+//   VS Code: "vs code", "vscode", "example", "demo", "run"        e.g. "show an example in VS Code for a list"
+const FORCE_PAINT = /diagram|draw|flow ?chart|\bflow\b|\bpaint\b|padam|varai|படம்|வரை/i;
+const FORCE_VSCODE = /vs ?code|visual studio|\bexample|\bdemo|\brun\b|\bexecute|code (?:ah|a)? ?kaatt?|உதாரணம்|எடுத்துக்காட்டு/i;
+
 const EXT = { python: "py", javascript: "js", java: "java", c: "c", cpp: "cpp" };
 const clip = (s, n) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 
 // ── planning (LLM picks the aids) ────────────────────────────────────────────
 function planPrompt(lang, question, context) {
+  const must = [FORCE_PAINT.test(question) && '"paint" (a diagram of the flow)', FORCE_VSCODE.test(question) && '"vscode" (a runnable example)'].filter(Boolean);
   return [
     {
       role: "system",
@@ -42,7 +49,7 @@ Tools:
 - "paint": a flow/concept diagram drawn in Paint. Fields: "title", "nodes" (2 to 8 short labels, in order) and optional "edges" ([[fromIndex,toIndex,"optional label"], ...], 0-based; default is a chain through the nodes in order).
 Use "vscode" for "explain step by step" or any concept that needs an example, "paint" for processes/flows/relationships, both if it really helps, and NONE for a simple factual doubt.
 Write all titles, labels and code comments in ${lang} (Tamil script or Tanglish as the student spoke); keep code and technical words in English.
-Reply with ONLY JSON: {"actions":[...]} - use {"actions":[]} when no visual is needed.`,
+${must.length ? `The student explicitly asked for a visual, so you MUST include: ${must.join(" and ")}.\n` : ""}Reply with ONLY compact JSON (no markdown): {"actions":[...]} - use {"actions":[]} when no visual is needed.`,
     },
     {
       role: "user",
@@ -74,11 +81,13 @@ function sanitize(raw) {
 
 // Returns a list of validated actions ([] when no visual is needed or anything goes wrong).
 async function plan(provider, lang, question, context) {
-  if (!wantsVisual(question)) return [];
+  if (!wantsVisual(question) && !(enabled() && (FORCE_PAINT.test(question) || FORCE_VSCODE.test(question)))) return [];
   try {
-    const reply = await chat(provider, planPrompt(lang, question, context), { maxTokens: 1000, temperature: 0.3 });
+    const reply = await chat(provider, planPrompt(lang, question, context), { maxTokens: 2500, temperature: 0.3 });
     const json = reply.match(/\{[\s\S]*\}/);
-    return json ? sanitize(JSON.parse(json[0])) : [];
+    const actions = json ? sanitize(JSON.parse(json[0])) : [];
+    console.log(`🛠️  tool plan: ${actions.map((a) => a.tool).join(", ") || "none"}`);
+    return actions;
   } catch (e) {
     console.error("tool plan error:", e.response?.data || e.message);
     return [];
@@ -131,17 +140,49 @@ function openVscode(file) {
   const exe = vscodeExe();
   if (!exe) throw new Error("VS Code not found (set TUTOR_VSCODE_PATH)");
   const settings = path.join(PROFILE_DIR, "User", "settings.json");
-  if (!fs.existsSync(settings)) {
-    fs.mkdirSync(path.dirname(settings), { recursive: true });
-    fs.writeFileSync(
-      settings,
-      JSON.stringify({ "editor.fontSize": 20, "editor.minimap.enabled": false, "workbench.startupEditor": "none", "security.workspace.trust.enabled": false, "update.mode": "none", "telemetry.telemetryLevel": "off" }, null, 2)
-    );
-  }
+  fs.mkdirSync(path.dirname(settings), { recursive: true });
+  let cur = {};
+  try { cur = JSON.parse(fs.readFileSync(settings, "utf8")); } catch {}
+  fs.writeFileSync(
+    settings,
+    JSON.stringify(
+      {
+        "editor.fontSize": 20, "editor.minimap.enabled": false, "workbench.startupEditor": "none", "security.workspace.trust.enabled": false,
+        "update.mode": "none", "telemetry.telemetryLevel": "off",
+        // lets the folder's tasks.json run the example in the integrated terminal as soon as the window opens
+        "task.allowAutomaticTasks": "on", "terminal.integrated.defaultProfile.windows": "Command Prompt", "terminal.integrated.fontSize": 18,
+        ...cur,
+        "task.allowAutomaticTasks": "on", "terminal.integrated.defaultProfile.windows": "Command Prompt",
+      },
+      null, 2
+    )
+  );
   const child = spawn(exe, ["--user-data-dir", PROFILE_DIR, "--new-window", path.dirname(file), file], { detached: true, stdio: "ignore" });
   child.on("error", (e) => console.error("could not start VS Code:", e.message));
   child.unref();
   vscodeProc = child;
+}
+
+// A folder-open task: VS Code runs the example in its integrated terminal (cmd) as soon as the window opens.
+function writeRunTask(dir, file, language, cls) {
+  const f = `"${file}"`;
+  const exe = path.join(dir, "demo.exe");
+  const command = {
+    python: `python -u ${f} || py -u ${f}`,
+    javascript: `node ${f}`,
+    java: `javac ${f} && java -cp "${dir}" ${cls || "Main"}`,
+    c: `gcc ${f} -o "${exe}" && "${exe}"`,
+    cpp: `g++ ${f} -o "${exe}" && "${exe}"`,
+  }[language];
+  const vs = path.join(dir, ".vscode");
+  fs.mkdirSync(vs, { recursive: true });
+  fs.writeFileSync(
+    path.join(vs, "tasks.json"),
+    JSON.stringify({
+      version: "2.0.0",
+      tasks: [{ label: "Run example", type: "shell", command, presentation: { reveal: "always", panel: "dedicated", focus: false, clear: true }, runOptions: { runOn: "folderOpen" }, problemMatcher: [] }],
+    }, null, 2)
+  );
 }
 
 // Writes the example into the demo folder, opens it in VS Code, runs it, and appends the output as comments.
@@ -151,6 +192,7 @@ async function showCode(a) {
   const cls = a.language === "java" ? (a.code.match(/public\s+(?:final\s+)?class\s+(\w+)/) || [])[1] || "Main" : null;
   const file = path.join(dir, `${cls || `example_${stamp()}`}.${EXT[a.language]}`);
   fs.writeFileSync(file, a.code, "utf8");
+  writeRunTask(dir, file, a.language, cls);
   await close(); // never leave an older demo window open
   openVscode(file);
   const result = await runCode(a.language, a.code);

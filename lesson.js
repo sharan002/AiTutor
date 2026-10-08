@@ -20,6 +20,7 @@ const TYPE_MS_PER_CHAR = 30;
 // After the student stops talking, wait this long for more speech before treating it as one finished question.
 const SETTLE_MS = Number(process.env.TUTOR_SETTLE_MS) || 700;
 // After "what is your doubt?" / "is it clear?", how long to wait for the student's reply.
+const AIDS_CLOSE_MS = (Number(process.env.TUTOR_AIDS_CLOSE_SEC) || 8) * 1000;
 const FOLLOWUP_MS = (Number(process.env.TUTOR_FOLLOWUP_WAIT_SEC) || 15) * 1000;
 
 class Tutor {
@@ -174,8 +175,8 @@ class Tutor {
   }
 
   // Wait for the student to reply to "what is your doubt?" / "is it clear?".
-  async waitForStudent() {
-    const end = Date.now() + FOLLOWUP_MS;
+  async waitForStudent(ms = FOLLOWUP_MS) {
+    const end = Date.now() + ms;
     while (Date.now() < end && !this.aborted && !this.hold && !this.questions.length) await sleep(200);
     await this.hold;
   }
@@ -192,11 +193,14 @@ class Tutor {
       // run, a Paint diagram). They open now and are closed again once the explanation is spoken.
       const actions = await tools.plan(this.lesson.provider, this.lesson.language, q, this.current);
       const shown = actions.length ? await tools.execute(actions) : "";
+      if (shown) this.lastShown = { text: shown, at: Date.now() };
+      // Follow-up doubts ("what does line 3 do?") are answered from the last code / diagram shown.
+      const earlier = !shown && this.lastShown && Date.now() - this.lastShown.at < 10 * 60 * 1000 ? this.lastShown.text : "";
       const closeAids = async () => {
         if (await tools.close()) await this.sink.focus?.(); // back to the meeting tab
       };
       try {
-        reply = await chat(this.lesson.provider, P.answerPrompt(this.lesson, q, this.current, this.awaiting, shown), {
+        reply = await chat(this.lesson.provider, P.answerPrompt(this.lesson, q, this.current, this.awaiting, shown || (earlier && `(shown to the student a little earlier - answer follow-up doubts about it using exactly this)\n${earlier}`)), {
           maxTokens: shown ? 700 : 450,
         });
       } catch (e) {
@@ -220,10 +224,13 @@ class Tutor {
       this.awaiting = tag === "ASK" ? "doubt" : tag === "ANSWER" ? "confirm" : null;
       if (tag === "ANSWER" || tag === "CHAT") this.lesson.qa.push({ question: q, answer });
       const done = await this.speak(toChunks(answer), { retry: false });
+      // Keep the demo window open while the tutor asks "is it clear?"; close it after 8s without a reply
+      // (or as soon as the student answers) and go back to the board tab.
+      if (shown && done && this.awaiting) await this.waitForStudent(AIDS_CLOSE_MS);
       await closeAids();
       this.board.set("ask", null);
       if (done && this.awaiting) {
-        await this.waitForStudent();
+        if (!shown) await this.waitForStudent();
         // No reply: treat the doubt as resolved and carry on with the lesson.
         if (!this.questions.length) this.awaiting = null;
       } else if (!done && !this.questions.length) {

@@ -154,9 +154,9 @@ class MeetSession extends EventEmitter {
     return ok;
   }
 
-  // Bring the meeting tab back to the front (after the tutor closed a demo window).
+  // Bring the AI Tutor board tab (localhost:7100) back to the front after the tutor closed a demo window.
   async focus() {
-    await this.meetPage?.bringToFront().catch(() => {});
+    await (this.boardPage || this.meetPage)?.bringToFront().catch(() => {});
   }
 
   // ── audio sink for the Tutor ────────────────────────────────────────────────
