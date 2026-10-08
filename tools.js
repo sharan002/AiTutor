@@ -31,7 +31,7 @@ const wantsVisual = (q) => enabled() && WANTS_VISUAL.test(q);
 // Explicit trigger words (also usable for testing). The LLM is told it MUST use the matching tool.
 //   Paint:   "draw", "diagram", "flow", "flowchart", "paint"      e.g. "open paint and draw the flow of a for loop"
 //   VS Code: "vs code", "vscode", "example", "demo", "run"        e.g. "show an example in VS Code for a list"
-const FORCE_PAINT = /diagram|draw|flow ?chart|\bflow\b|\bpaint\b|padam|varai|படம்|வரை/i;
+const FORCE_PAINT = /diagram|draw|flow ?chart|\bflow\b|\bpain?t|\bpeint|padam|varai|படம்|வரை|பெ?[யே]ி?[ணன]்ட்|பைண்ட்/i;
 const FORCE_VSCODE = /vs ?code|visual studio|\bexample|\bdemo|\brun\b|\bexecute|code (?:ah|a)? ?kaatt?|உதாரணம்|எடுத்துக்காட்டு/i;
 
 const EXT = { python: "py", javascript: "js", java: "java", c: "c", cpp: "cpp" };
@@ -86,6 +86,11 @@ async function plan(provider, lang, question, context) {
     const reply = await chat(provider, planPrompt(lang, question, context), { maxTokens: 2500, temperature: 0.3 });
     const json = reply.match(/\{[\s\S]*\}/);
     const actions = json ? sanitize(JSON.parse(json[0])) : [];
+    // The student explicitly asked for Paint but the planner skipped it: draw a simple diagram of the topic.
+    if (FORCE_PAINT.test(question) && !actions.some((a) => a.tool === "paint")) {
+      const t = clip(context.topic, 40) || "Topic";
+      actions.push({ tool: "paint", title: t, nodes: [t, "Input", "Process", "Output"], edges: [{ from: 0, to: 1, label: "" }, { from: 1, to: 2, label: "" }, { from: 2, to: 3, label: "" }] });
+    }
     console.log(`🛠️  tool plan: ${actions.map((a) => a.tool).join(", ") || "none"}`);
     return actions;
   } catch (e) {
@@ -117,8 +122,8 @@ function vscodeExe() {
   const c = [
     process.env.TUTOR_VSCODE_PATH,
     path.join(process.env.LOCALAPPDATA || "", "Programs", "Microsoft VS Code", "Code.exe"),
-    "C:\Program Files\Microsoft VS Code\Code.exe",
-    "C:\Program Files (x86)\Microsoft VS Code\Code.exe",
+    "C:\\Program Files\\Microsoft VS Code\\Code.exe",
+    "C:\\Program Files (x86)\\Microsoft VS Code\\Code.exe",
   ].filter(Boolean);
   return c.find((p) => fs.existsSync(p));
 }
@@ -311,4 +316,6 @@ async function execute(actions) {
   return shown.join("\n");
 }
 
-module.exports = { plan, execute, close, enabled };
+const isOpen = () => !!vscodeProc?.pid;
+
+module.exports = { plan, execute, close, enabled, isOpen };

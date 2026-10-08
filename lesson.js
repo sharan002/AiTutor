@@ -199,6 +199,8 @@ class Tutor {
       const closeAids = async () => {
         if (await tools.close()) await this.sink.focus?.(); // back to the meeting tab
       };
+      // The aids (VS Code / Paint) stay open while the student keeps asking about them.
+      const aidsOpen = () => tools.isOpen();
       try {
         reply = await chat(this.lesson.provider, P.answerPrompt(this.lesson, q, this.current, this.awaiting, shown || (earlier && `(shown to the student a little earlier - answer follow-up doubts about it using exactly this)\n${earlier}`)), {
           maxTokens: shown ? 700 : 450,
@@ -211,7 +213,6 @@ class Tutor {
       // The student said more while we were thinking: answer it all together, not a stale reply.
       await this.hold;
       if (this.questions.length) {
-        await closeAids();
         this.questions[0] = `${q} ${this.questions[0]}`;
         continue;
       }
@@ -224,11 +225,17 @@ class Tutor {
       this.awaiting = tag === "ASK" ? "doubt" : tag === "ANSWER" ? "confirm" : null;
       if (tag === "ANSWER" || tag === "CHAT") this.lesson.qa.push({ question: q, answer });
       const done = await this.speak(toChunks(answer), { retry: false });
-      // Keep the demo window open while the tutor asks "is it clear?"; close it after 8s without a reply
-      // (or as soon as the student answers) and go back to the board tab.
-      if (shown && done && this.awaiting) await this.waitForStudent(AIDS_CLOSE_MS);
-      await closeAids();
+      // Keep the demo window open while the tutor asks "is it clear?" and wait AIDS_CLOSE_MS for a reply.
+      // A further doubt keeps it open (answered next round); "ok / yes / no doubt" (RESOLVED), silence or
+      // an unrelated remark closes it and the lesson carries on.
+      let kept = false;
+      if (aidsOpen()) {
+        if (this.awaiting && !this.questions.length) await this.waitForStudent(AIDS_CLOSE_MS);
+        kept = this.awaiting && this.questions.length > 0;
+        if (!kept) await closeAids();
+      }
       this.board.set("ask", null);
+      if (kept) continue;
       if (done && this.awaiting) {
         if (!shown) await this.waitForStudent();
         // No reply: treat the doubt as resolved and carry on with the lesson.
