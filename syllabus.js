@@ -3,6 +3,8 @@
 //   @title: Python for Beginners        <- optional directives (before/between content)
 //   @language: ta-IN                    <- teaching language (default: env SARVAM_STT_LANGUAGE)
 //   @code: python                       <- default language for #code# blocks (default: from file name)
+//   @run: vscode                        <- where code is executed: vscode | jupyter | board
+//                                          (default: jupyter for files in an AI folder, vscode otherwise)
 //   @instructions: Use real-life examples
 //
 //   # Variables                         <- heading = topic (1-4 leading #, then a space)
@@ -12,7 +14,8 @@
 //   print(x)
 //   #/code#                             <- ends it ("#endcode#" or another "#code#" also work)
 //
-// Result: { title, language, codeLang, instructions, blocks: [{type:'text'|'code', topic, ...}] }
+// Syllabus files can live in course folders (syllabus/Python/python1.txt, syllabus/AI/ML1.txt).
+// Result: { title, course, runner, language, codeLang, instructions, blocks: [{type:'text'|'code', topic, ...}] }
 
 const CODE_OPEN = /^\s*#code(?:[\s:]+([\w+-]+))?\s*#\s*$/i;
 const CODE_CLOSE = /^\s*#\s*(?:\/code|endcode|end)\s*#\s*$/i;
@@ -28,6 +31,21 @@ const ALIASES = {
 function normLang(l) {
   const k = String(l || "").trim().toLowerCase();
   return ALIASES[k] || k;
+}
+
+// The course is the folder the syllabus sits in (inside a "syllabus" folder): syllabus/AI/ML1.txt -> "AI".
+function courseOf(fileName) {
+  const parts = String(fileName || "").split(/[\\/]/).filter(Boolean);
+  const i = parts.lastIndexOf("syllabus");
+  return i >= 0 && parts.length - i > 2 ? parts[parts.length - 2] : "";
+}
+
+function normRunner(r) {
+  const k = String(r || "").trim().toLowerCase();
+  if (/^(jupyter|notebook|ipynb)/.test(k)) return "jupyter";
+  if (/^(vscode|vs ?code|code)$/.test(k)) return "vscode";
+  if (/^(board|browser|terminal|off)$/.test(k)) return "board";
+  return null;
 }
 
 const countWords = (s) => (s.match(/\S+/g) || []).length;
@@ -124,7 +142,11 @@ function parseSyllabus(raw, fileName = "") {
   flushText();
 
   const base = fileName.replace(/^.*[\\/]/, "").replace(/\.[^.]+$/, "");
-  const codeLang = normLang(meta.code || meta.codelanguage || base);
+  const course = courseOf(fileName);
+  // "python1" / "python_2" -> "python"
+  const runner = normRunner(meta.run || meta.runner) || normRunner(process.env.TUTOR_RUNNER) || (/^(ai|ml|data ?science|deep ?learning)$/i.test(course) ? "jupyter" : "vscode");
+  // Notebooks run Python: "ML1.txt" has no language of its own.
+  const codeLang = normLang(meta.code || meta.codelanguage || (runner === "jupyter" ? "python" : base.replace(/[\s_-]*\d+$/, "")));
   for (const b of blocks) if (b.type === "code") b.lang = b.lang || codeLang || "python";
 
   // Detected language per block (code blocks follow the notes before them); null = no detection.
@@ -148,6 +170,8 @@ function parseSyllabus(raw, fileName = "") {
 
   return {
     title: meta.title || (base ? base[0].toUpperCase() + base.slice(1) : "Programming class"),
+    course,
+    runner,
     language: meta.language || null,
     detectedLanguage: dominant,
     codeLang: codeLang || "python",

@@ -6,11 +6,16 @@
 // The LLM only chooses WHAT to show (a small JSON plan); this file validates it and is the only code
 // that touches the PC - no arbitrary commands, only these two whitelisted actions, files in ./tools-output.
 // Windows only. Turn off with TUTOR_TOOLS=off.
+//
+// The same VS Code window is also the "stage" for syllabus code (lesson.js, syllabus `@run: vscode`):
+// openLesson() shows the code, runLesson() runs it in VS Code's terminal on cue. For `@run: jupyter` (AI classes)
+// jupyter.js plays that role. A doubt about code on stage is answered by walking through it, or by a new similar example.
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { chat } = require("./llm");
 const { runCode } = require("./runner");
+const jupyter = require("./jupyter");
 
 const OUT_DIR = path.join(__dirname, "tools-output");
 const enabled = () => process.platform === "win32" && !/^(off|0|false)$/i.test(process.env.TUTOR_TOOLS || "");
@@ -35,25 +40,34 @@ const FORCE_PAINT = /diagram|draw|flow ?chart|\bflow\b|\bpain?t|\bpeint|padam|va
 const FORCE_VSCODE = /vs ?code|visual studio|\bexample|\bdemo|\brun\b|\bexecute|code (?:ah|a)? ?kaatt?|உதாரணம்|எடுத்துக்காட்டு/i;
 
 const EXT = { python: "py", javascript: "js", java: "java", c: "c", cpp: "cpp" };
+let runner = "vscode"; // where examples run: "vscode" | "jupyter" (set by the Tutor from the syllabus)
+const setRunner = (r) => (runner = r === "jupyter" ? "jupyter" : "vscode");
 const clip = (s, n) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 
 // ── planning (LLM picks the aids) ────────────────────────────────────────────
 function planPrompt(lang, question, context) {
+  const where = runner === "jupyter" ? "a Jupyter notebook cell" : "VS Code";
+  const stage = context.stage
+    ? `The lesson code is ALREADY open on the shared screen in ${context.stage === "jupyter" ? "a Jupyter notebook" : "VS Code"} and has been run (code and output below). ${context.walked ? "You have already walked through it " + context.walked + " time(s)." : ""}
+- If the student says they did not understand / it is not resolved / asks to explain it: if you have NOT walked through it yet reply {"actions":[],"walkthrough":true} (the tutor then explains the open code step by step); if you already did, or the student asks for another example, make a NEW similar example (same idea, different values or situation) as a "vscode" action.
+- If the student says it is clear / resolved / thanks / no doubt: reply {"actions":[]}.
+`
+      : "";
   const must = [FORCE_PAINT.test(question) && '"paint" (a diagram of the flow)', FORCE_VSCODE.test(question) && '"vscode" (a runnable example)'].filter(Boolean);
   return [
     {
       role: "system",
       content: `You prepare visual aids for a live programming class. A student asked something; decide whether a visual on the shared screen would help, and design it.
 Tools:
-- "vscode": a small runnable example opened and run in VS Code. Use for "explain step by step", new concepts (functions, loops, lists...) or whenever the code on screen is not enough: write a NEW short example if needed. Fields: "title", "language" (python, javascript, java, c or cpp - the course language), "code" (complete program, max 30 lines, no input(), prints its results, with a short comment above each step in ${lang}; for Java use "public class Main").
+- "vscode": a small runnable example opened and run in ${where}${runner === "jupyter" ? " (python only; numpy / pandas / scikit-learn are available)" : ""}. Use for "explain step by step", new concepts (functions, loops, lists...) or whenever the code on screen is not enough: write a NEW short example if needed. Fields: "title", "language" (python, javascript, java, c or cpp - the course language), "code" (complete program, max 30 lines, no input(), prints its results, with a short comment above each step in ${lang}; for Java use "public class Main").
 - "paint": a flow/concept diagram drawn in Paint. Fields: "title", "nodes" (2 to 8 short labels, in order) and optional "edges" ([[fromIndex,toIndex,"optional label"], ...], 0-based; default is a chain through the nodes in order).
 Use "vscode" for "explain step by step" or any concept that needs an example, "paint" for processes/flows/relationships, both if it really helps, and NONE for a simple factual doubt.
 Write all titles, labels and code comments in ${lang} (Tamil script or Tanglish as the student spoke); keep code and technical words in English.
-${must.length ? `The student explicitly asked for a visual, so you MUST include: ${must.join(" and ")}.\n` : ""}Reply with ONLY compact JSON (no markdown): {"actions":[...]} - use {"actions":[]} when no visual is needed.`,
+${must.length ? `The student explicitly asked for a visual, so you MUST include: ${must.join(" and ")}.\n` : ""}${stage}Reply with ONLY compact JSON (no markdown): {"actions":[...]} - use {"actions":[]} when no visual is needed.`,
     },
     {
       role: "user",
-      content: `Topic: "${context.topic || ""}"${context.code ? `\nCode on screen:\n${String(context.code).slice(0, 500)}` : ""}${context.text ? `\nNotes:\n${String(context.text).slice(0, 500)}` : ""}\n\nStudent said: "${question}"`,
+      content: `Topic: "${context.topic || ""}"${context.code ? `\nCode on screen:\n${String(context.code).slice(0, 500)}` : ""}${context.stage && context.output ? `\nIts output:\n${String(context.output).slice(0, 300)}` : ""}${context.text ? `\nNotes:\n${String(context.text).slice(0, 500)}` : ""}\n\nStudent said: "${question}"`,
     },
   ];
 }
@@ -80,18 +94,23 @@ function sanitize(raw) {
 }
 
 // Returns a list of validated actions ([] when no visual is needed or anything goes wrong).
+// The returned array has `walkthrough = true` when the student wants the code already on stage explained step by step.
 async function plan(provider, lang, question, context) {
-  if (!wantsVisual(question) && !(enabled() && (FORCE_PAINT.test(question) || FORCE_VSCODE.test(question)))) return [];
+  // A reply to "is your doubt resolved?" about code on stage always goes to the planner (a plain "no" has no keywords).
+  const onStage = enabled() && !!context.stage && context.awaiting === "confirm";
+  if (!onStage && !wantsVisual(question) && !(enabled() && (FORCE_PAINT.test(question) || FORCE_VSCODE.test(question)))) return [];
   try {
     const reply = await chat(provider, planPrompt(lang, question, context), { maxTokens: 2500, temperature: 0.3 });
     const json = reply.match(/\{[\s\S]*\}/);
-    const actions = json ? sanitize(JSON.parse(json[0])) : [];
+    const parsed = json ? JSON.parse(json[0]) : null;
+    const actions = parsed ? sanitize(parsed) : [];
+    if (context.stage && parsed?.walkthrough && !actions.length) actions.walkthrough = true;
     // The student explicitly asked for Paint but the planner skipped it: draw a simple diagram of the topic.
     if (FORCE_PAINT.test(question) && !actions.some((a) => a.tool === "paint")) {
       const t = clip(context.topic, 40) || "Topic";
       actions.push({ tool: "paint", title: t, nodes: [t, "Input", "Process", "Output"], edges: [{ from: 0, to: 1, label: "" }, { from: 1, to: 2, label: "" }, { from: 2, to: 3, label: "" }] });
     }
-    console.log(`🛠️  tool plan: ${actions.map((a) => a.tool).join(", ") || "none"}`);
+    console.log(`🛠️  tool plan: ${actions.map((a) => a.tool).join(", ") || (actions.walkthrough ? "walkthrough" : "none")}`);
     return actions;
   } catch (e) {
     console.error("tool plan error:", e.response?.data || e.message);
@@ -136,7 +155,8 @@ function killTree(pid) {
 async function close() {
   const proc = vscodeProc;
   vscodeProc = null;
-  if (!proc?.pid) return false;
+  const notebook = await jupyter.close();
+  if (!proc?.pid) return notebook;
   await killTree(proc.pid);
   return true;
 }
@@ -169,16 +189,26 @@ function openVscode(file) {
 }
 
 // A folder-open task: VS Code runs the example in its integrated terminal (cmd) as soon as the window opens.
-function writeRunTask(dir, file, language, cls) {
+function runCommand(dir, file, language, cls) {
   const f = `"${file}"`;
   const exe = path.join(dir, "demo.exe");
-  const command = {
+  return {
     python: `python -u ${f} || py -u ${f}`,
     javascript: `node ${f}`,
     java: `javac ${f} && java -cp "${dir}" ${cls || "Main"}`,
     c: `gcc ${f} -o "${exe}" && "${exe}"`,
     cpp: `g++ ${f} -o "${exe}" && "${exe}"`,
   }[language];
+}
+
+// `gate`: the task only waits until that file appears, then runs the command (see openLesson / runLesson).
+function writeRunTask(dir, file, language, cls, gate) {
+  let command = runCommand(dir, file, language, cls);
+  if (gate) {
+    fs.writeFileSync(path.join(dir, "run-command.txt"), command, "utf8");
+    fs.writeFileSync(path.join(dir, "wait-run.js"), WAIT_RUN_JS, "utf8");
+    command = `node "${path.join(dir, "wait-run.js")}" "${gate}"`;
+  }
   const vs = path.join(dir, ".vscode");
   fs.mkdirSync(vs, { recursive: true });
   fs.writeFileSync(
@@ -188,6 +218,42 @@ function writeRunTask(dir, file, language, cls) {
       tasks: [{ label: "Run example", type: "shell", command, presentation: { reveal: "always", panel: "dedicated", focus: false, clear: true }, runOptions: { runOn: "folderOpen" }, problemMatcher: [] }],
     }, null, 2)
   );
+}
+
+// Helper for the lesson stage: waits for the "go" file, then runs run-command.txt in the VS Code terminal.
+const WAIT_RUN_JS = `const fs = require("fs"), path = require("path"), { spawn } = require("child_process");
+const gate = process.argv[2];
+const cmd = fs.readFileSync(path.join(__dirname, "run-command.txt"), "utf8");
+(async () => {
+  while (!fs.existsSync(gate)) await new Promise((r) => setTimeout(r, 150));
+  fs.rmSync(gate, { force: true });
+  spawn(cmd, { shell: true, stdio: "inherit" }).on("close", (c) => process.exit(c || 0));
+})();
+`;
+
+// Lesson stage, VS Code: show the syllabus code in its own VS Code window; its terminal waits until runLesson().
+let lessonGate = null;
+async function openLesson({ code, language, title }) {
+  if (!enabled() || !vscodeExe() || !EXT[language]) throw new Error("VS Code stage not available");
+  const dir = VSCODE_DIR();
+  fs.mkdirSync(dir, { recursive: true });
+  const cls = language === "java" ? (code.match(/public\s+(?:final\s+)?class\s+(\w+)/) || [])[1] || "Main" : null;
+  const file = path.join(dir, `${cls || `lesson_${stamp()}`}.${EXT[language]}`);
+  fs.writeFileSync(file, code, "utf8");
+  lessonGate = path.join(dir, ".go");
+  fs.rmSync(lessonGate, { force: true });
+  writeRunTask(dir, file, language, cls, lessonGate);
+  await close();
+  openVscode(file);
+  console.log(`💻 vscode: ${title || "lesson code"} opened`);
+}
+
+// Runs the lesson code in VS Code's terminal (students watch it there) and returns the result for the explanation.
+async function runLesson(language, code) {
+  if (lessonGate) fs.writeFileSync(lessonGate, "go");
+  const result = await runCode(language, code);
+  console.log(`💻 vscode: ran ${language} lesson code (exit ${result.exitCode})`);
+  return result;
 }
 
 // Writes the example into the demo folder, opens it in VS Code, runs it, and appends the output as comments.
@@ -302,8 +368,9 @@ async function execute(actions) {
   for (const a of actions) {
     try {
       if (a.tool === "vscode") {
-        const out = await showCode(a);
-        shown.push(`VS Code is open with this ${a.language} example "${a.title}", which was just run:\n${a.code.slice(0, 1200)}\nIts output:\n${out.slice(0, 500)}`);
+        const nb = runner === "jupyter" && a.language === "python" && (await jupyter.available());
+        const out = nb ? await jupyter.example(a) : await showCode(a);
+        shown.push(`${nb ? "A Jupyter notebook" : "VS Code"} is open with this ${a.language} example "${a.title}", which was just run:\n${a.code.slice(0, 1200)}\nIts output:\n${out.slice(0, 500)}`);
       } else {
         console.log(`🎨 paint: ${clip(a.title, 60)}`);
         await openDiagram(a);
@@ -316,6 +383,6 @@ async function execute(actions) {
   return shown.join("\n");
 }
 
-const isOpen = () => !!vscodeProc?.pid;
+const isOpen = () => !!vscodeProc?.pid || jupyter.isOpen();
 
-module.exports = { plan, execute, close, enabled, isOpen };
+module.exports = { plan, execute, close, enabled, isOpen, setRunner, openLesson, runLesson };

@@ -13,6 +13,7 @@ const { runCode } = require("./runner");
 const { plainSpeech, toChunks } = require("./speech");
 const P = require("./prompts");
 const tools = require("./tools");
+const jupyter = require("./jupyter");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DOUBT_WAIT_MS = (Number(process.env.TUTOR_DOUBT_WAIT_SEC) || 8) * 1000;
@@ -50,6 +51,9 @@ class Tutor {
     this._ttsFails = 0;
     this.scripts = new Map();
     this.current = {}; // what's on screen right now (context for doubts)
+    // Where syllabus code is shown and run: "vscode" | "jupyter" | "board" (the old in-page terminal).
+    this.runner = syllabus.runner || "vscode";
+    tools.setRunner(this.runner);
   }
 
   // ── progress (resume where the last class stopped) ─────────────────────────
@@ -191,12 +195,21 @@ class Tutor {
       let reply;
       // Agent mode: for "explain step by step" / "not clear" doubts, pick visual aids (a VS Code example that is
       // run, a Paint diagram). They open now and are closed again once the explanation is spoken.
-      const actions = await tools.plan(this.lesson.provider, this.lesson.language, q, this.current);
-      const shown = actions.length ? await tools.execute(actions) : "";
+      const onStage = tools.isOpen() ? this.current.stage : null; // lesson code currently open in VS Code / Jupyter
+      const actions = await tools.plan(this.lesson.provider, this.lesson.language, q, { ...this.current, stage: onStage, awaiting: this.awaiting });
+      let shown = actions.length ? await tools.execute(actions) : "";
+      if (shown) this.current.stage = null; // a new example replaced the lesson code on screen
+      else if (actions.walkthrough && onStage) {
+        // "Not resolved": explain the code that is already open, step by step.
+        const c = this.current;
+        c.walked = (c.walked || 0) + 1;
+        shown = `${onStage === "jupyter" ? "A Jupyter notebook" : "VS Code"} is open on the shared screen with this ${c.lang} code, which was already run:\n${String(c.code).slice(0, 1200)}\nIts output:\n${String(c.output || "(no output)").slice(0, 500)}\n(The student did not understand it: explain THIS code again, one line at a time, in simpler words.)`;
+      }
       if (shown) this.lastShown = { text: shown, at: Date.now() };
       // Follow-up doubts ("what does line 3 do?") are answered from the last code / diagram shown.
       const earlier = !shown && this.lastShown && Date.now() - this.lastShown.at < 10 * 60 * 1000 ? this.lastShown.text : "";
       const closeAids = async () => {
+        this.current.stage = null;
         if (await tools.close()) await this.sink.focus?.(); // back to the meeting tab
       };
       // The aids (VS Code / Paint) stay open while the student keeps asking about them.
@@ -313,7 +326,78 @@ class Tutor {
     await this.speak(toChunks(text));
   }
 
+  // Shows the syllabus code in VS Code (or a Jupyter notebook for AI classes). Returns "vscode" | "jupyter",
+  // or null when that is not possible (runner "board", tools off, not installed): the board terminal is used then.
+  async openStage(b) {
+    if (this.runner === "board" || !tools.enabled()) return null;
+    try {
+      if (this.runner === "jupyter") {
+        if (b.lang !== "python" || !(await jupyter.available())) {
+          if (!this._jupyterWarned) console.warn("⚠️  Jupyter not available (pip install notebook nbconvert ipykernel) - running code on the board instead.");
+          this._jupyterWarned = true;
+          return null;
+        }
+        await jupyter.begin({ code: b.code, topic: b.topic, title: b.topic });
+        return "jupyter";
+      }
+      await tools.openLesson({ code: b.code, language: b.lang, title: b.topic });
+      return "vscode";
+    } catch (e) {
+      console.error("code stage unavailable, using the board:", e.message);
+      return null;
+    }
+  }
+
+  // Close VS Code / the notebook and bring the meeting tab back to the front.
+  async closeStage() {
+    this.current.stage = null;
+    if (await tools.close()) await this.sink.focus?.();
+  }
+
+  // Syllabus code on the "stage": shown in VS Code / Jupyter -> explained -> run there -> outcome explained ->
+  // "is your doubt resolved?" (DOUBT_WAIT_MS) -> a doubt gets a step-by-step walkthrough or a new similar example
+  // (drain) -> VS Code / Jupyter is closed and the Meet tab is shown again.
+  async teachCodeOnStage(b, kind) {
+    this.lesson.language = this.langOf(b);
+    this.current = { ...this.current, topic: b.topic, code: b.code, lang: b.lang, output: "", stage: kind, walked: 0 };
+    this.showSection({ ...b, text: "" });
+    this.board.set("output", null);
+    this.board.set("code", { lang: b.lang, code: b.code, typeMs: Math.min(TYPE_MS_PER_CHAR * b.code.length, 7000), id: Date.now() });
+    const intro = this.script(b.index); // generated while the code is on screen
+    await sleep(800);
+    await this.speak(toChunks(await intro));
+
+    // A doubt during the explanation may have closed or replaced the window: put the lesson code back before running.
+    if (!tools.isOpen() || !this.current.stage) kind = await this.openStage(b);
+    this.current.stage = kind;
+    this.board.set("output", { running: true });
+    console.log(`▶️  running ${b.lang} code in ${kind || "the board"} (${b.code.split("\n").length} lines)`);
+    const result = kind === "jupyter" ? await jupyter.run() : kind === "vscode" ? await tools.runLesson(b.lang, b.code) : await runCode(b.lang, b.code);
+    this.board.set("output", { ...result, running: false });
+    this.current.output = (result.stdout + result.stderr).trim();
+    await sleep(600);
+
+    const endOfTopic = this.endsTopic(b.index) ? b.topic || this.lesson.title : null;
+    const outro = await this.generate(P.codeOutputPrompt(this.lesson, b, result, { endOfTopic }), "", 900);
+    if (outro) await this.speak(toChunks(outro));
+    if (!kind) return;
+
+    // "Is your doubt resolved?" - a topic's last block already ended with a doubt question.
+    if (!endOfTopic && !this.questions.length && !this.hold) {
+      const ask = await this.generate(P.resolvedPrompt(this.lesson), "Is your doubt resolved? Please tell me if anything is not clear.", 200);
+      this.awaiting = "confirm";
+      await this.speak(toChunks(ask), { retry: false });
+    }
+    this.awaiting = "confirm";
+    await this.waitForStudent(DOUBT_WAIT_MS);
+    if (this.questions.length) await this.drain(); // a doubt: explained step by step / with a new example, then 8s again
+    if (!this.questions.length) this.awaiting = null; // silence = resolved
+    await this.closeStage();
+  }
+
   async teachCode(b) {
+    const stage = await this.openStage(b);
+    if (stage) return this.teachCodeOnStage(b, stage);
     this.lesson.language = this.langOf(b);
     this.current = { ...this.current, topic: b.topic, code: b.code, lang: b.lang, output: "" };
     this.showSection({ ...b, text: "" });

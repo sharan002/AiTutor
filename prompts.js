@@ -91,6 +91,19 @@ Write in ${lang(l)}. Output only the words to be spoken.`,
   ];
 }
 
+// After the code was run and explained: check whether the students are fine before moving on.
+function resolvedPrompt(l) {
+  return [
+    { role: "system", content: persona(l) },
+    {
+      role: "user",
+      content: `You just ran the code on the shared screen and explained its output.${tail(l)}
+In ONE short sentence (under 25 words) ask the students whether their doubt is resolved / everything about this code is clear, and tell them to say so if not, because you will explain it again step by step. Do not greet and do not repeat what you said.
+Write in ${lang(l)}. Output only the words to be spoken.`,
+    },
+  ];
+}
+
 const REPLY_TAGS = ["ASK", "ANSWER", "RESOLVED", "CHAT"];
 
 // The doubt-handling model starts its reply with a tag so the tutor knows what to do next.
@@ -143,4 +156,4 @@ function closingPrompt(l) {
   ];
 }
 
-module.exports = { LANGUAGES, openingPrompt, textPrompt, codeIntroPrompt, codeOutputPrompt, answerPrompt, parseReply, closingPrompt };
+module.exports = { LANGUAGES, openingPrompt, textPrompt, codeIntroPrompt, codeOutputPrompt, resolvedPrompt, answerPrompt, parseReply, closingPrompt };

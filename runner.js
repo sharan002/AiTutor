@@ -91,4 +91,4 @@ async function runCode(lang, code) {
   }
 }
 
-module.exports = { runCode };
+module.exports = { runCode, candidates };

@@ -28,7 +28,18 @@ function parseArgs(argv) {
 
 function findSyllabus(name) {
   const tries = [name, path.join(__dirname, name), path.join(__dirname, "syllabus", name), path.join(__dirname, "syllabus", name + ".txt")];
-  const hit = tries.find((p) => fs.existsSync(p) && fs.statSync(p).isFile());
+  let hit = tries.find((p) => fs.existsSync(p) && fs.statSync(p).isFile());
+  // Course folders: "python1" or "Python/python1" -> syllabus/Python/python1.txt
+  if (!hit) {
+    const want = path.basename(name).replace(/\.txt$/i, "").toLowerCase();
+    const walk = (dir) =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+        const p = path.join(dir, e.name);
+        return e.isDirectory() ? walk(p) : /\.txt$/i.test(e.name) && e.name.slice(0, -4).toLowerCase() === want ? [p] : [];
+      });
+    const root = path.join(__dirname, "syllabus");
+    hit = fs.existsSync(root) ? walk(root)[0] : null;
+  }
   if (!hit) throw new Error(`Syllabus not found: ${name} (looked in ./ and ./syllabus/)`);
   return hit;
 }

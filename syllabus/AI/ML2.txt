@@ -1,0 +1,79 @@
+@title: Machine Learning in Practice
+@language: en-IN
+@code: python
+@run: jupyter
+@instructions: Be encouraging. Use everyday analogies. Keep sentences short. The code runs in a Jupyter notebook, so each cell builds on the cells above it.
+
+# Loading a Dataset
+
+Real project-la dataset-a CSV file-la irundhu edukkuvom. Inga practice-kku scikit-learn kooda varra Iris flower dataset use panrom.
+Ovvoru row-um oru flower. Petal, sepal length-width than features; flower-oda type than answer.
+Oru nalla data scientist, model build panradhukku munnaadi data-va nalla paathukkuvaanga.
+
+#code#
+import pandas as pd
+from sklearn.datasets import load_iris
+
+iris = load_iris(as_frame=True)
+df = iris.frame
+df["species"] = df["target"].map(dict(enumerate(iris.target_names)))
+df.head()
+#/code#
+
+#code#
+print("Rows and columns:", df.shape)
+print(df["species"].value_counts())
+#/code#
+
+# Train and Test Split
+
+Model-a ellaa data-vulayum train panna koodadhu. Exam-ku munnaadi paartha question-aye exam-la kettaa, adhu unmaiyaana test illa.
+Adhanaala data-va rendaa pirikkirom: train data-la model kathukkum, test data-la adhu evlo nalla panradhu-nnu check pannuvom.
+
+#code#
+from sklearn.model_selection import train_test_split
+
+X = df[iris.feature_names]
+y = df["target"]
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+print("Train rows:", len(X_train))
+print("Test rows:", len(X_test))
+#/code#
+
+# Classification
+
+Classification-na, oru item enna category-nu kandupidikkaradhu. Inga flower enna species-nu predict panrom.
+K-Nearest Neighbors-la, pudhu flower-ku romba pakkathula irukkura flowers enna type-o, adhe type-nu solluvom. Neighbours-la majority vote than.
+
+#code#
+from sklearn.neighbors import KNeighborsClassifier
+
+knn = KNeighborsClassifier(n_neighbors=3)
+knn.fit(X_train, y_train)
+predictions = knn.predict(X_test)
+print("First 10 predictions:", predictions[:10])
+print("First 10 real values:", y_test.values[:10])
+#/code#
+
+# Checking the Model
+
+Accuracy-na, test data-la evlo percent correct-aa predict pannichu-nu sollum.
+Accuracy mattum illa, confusion matrix paartha, entha type-a entha type-nu thappaa solluchu-nu theriyum.
+
+#code#
+from sklearn.metrics import accuracy_score, confusion_matrix
+
+print("Accuracy:", round(accuracy_score(y_test, predictions) * 100, 1), "%")
+print(confusion_matrix(y_test, predictions))
+#/code#
+
+# Predicting New Data
+
+Model ready aana, pudhu flower-oda measurements kudutha, adhu species-a sollum. Idhu thaan Machine Learning-oda unmaiyaana payan.
+Kadaisiya, predict output number-aa varum; adha species peru-aa maathi paakkalaam.
+
+#code#
+new_flower = pd.DataFrame([[5.1, 3.5, 1.4, 0.2]], columns=iris.feature_names)
+label = knn.predict(new_flower)[0]
+print("This flower looks like:", iris.target_names[label])
+#/code#

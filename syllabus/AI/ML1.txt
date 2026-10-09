@@ -1,0 +1,107 @@
+@title: Introduction to AI and Machine Learning
+@language: en-IN
+@code: python
+@run: jupyter
+@instructions: Be encouraging. Use everyday analogies. Keep sentences short. The code runs in a Jupyter notebook, so each cell builds on the cells above it.
+
+# What is AI and Machine Learning
+
+AI-na, computer-ku manushanoda mathiri yosikka, kathukka kathu kudukkura oru thurai.
+Machine Learning-la, naama rules ezhudha maatom; computer-ku niraya data kudutha, adhu thaane pattern-a kandupidichukkum.
+Udhaaranam: spam email-a kandupidikka, movie recommend panna, price predict panna ellam Machine Learning thaan use aagudhu.
+Intha class-la Jupyter Notebook use panni, cell by cell code ezhudhi output-a udane paarkalaam.
+
+#code#
+# A notebook cell runs top to bottom, and the last value is shown automatically
+students = 25
+passed = 20
+pass_rate = passed / students * 100
+print("Pass rate:", pass_rate, "%")
+#/code#
+
+# NumPy Arrays
+
+NumPy-na, numbers-a fast-aa handle panna use aagura Python library.
+Oru NumPy array-la ellaa values-um same type-aa irukkum, adhanaala oru vaati-la ellaa values-kum calculation panna mudiyum.
+Loop ezhudha vendiyadhilla; array * 2 nu ezhudhinaale ovvoru value-um double aagum.
+
+#code#
+import numpy as np
+
+marks = np.array([45, 62, 78, 90, 55])
+print("Marks:", marks)
+print("Average:", marks.mean())
+print("Highest:", marks.max())
+print("Marks after 5 bonus:", marks + 5)
+#/code#
+
+Mean-na average. Standard deviation-na values evlo spread aagi irukku-nnu sollum.
+
+#code#
+print("Spread (std):", round(marks.std(), 2))
+print("Above average:", marks[marks > marks.mean()])
+#/code#
+
+# Pandas DataFrame
+
+Pandas-na, data-va Excel table mathiri row, column-aa vachukka help panra library.
+Oru table-ku DataFrame nu peru. Column name vachu data-va easy-aa select panna, filter panna, average edukka mudiyum.
+
+#code#
+import pandas as pd
+
+data = pd.DataFrame({
+    "name": ["Asha", "Ravi", "Meena", "Kumar", "Divya"],
+    "hours_studied": [2, 4, 6, 8, 10],
+    "marks": [45, 62, 78, 90, 55],
+})
+data
+#/code#
+
+Oru column-a data["marks"] nu edukkalaam. Condition vachu rows-a filter pannalaam.
+
+#code#
+print(data["marks"].mean())
+print(data[data["marks"] > 60])
+data.describe()
+#/code#
+
+# Visualizing Data
+
+Data-va graph-aa paarthaal pattern easy-aa puriyum.
+Matplotlib-la scatter plot potta, ovvoru point-um oru student; hours athigam aana marks yeruthaa-nnu paakkalaam.
+
+#code#
+import matplotlib.pyplot as plt
+
+plt.scatter(data["hours_studied"], data["marks"])
+plt.xlabel("Hours studied")
+plt.ylabel("Marks")
+plt.title("Study hours vs marks")
+plt.show()
+#/code#
+
+# Your First Model
+
+Oru model-na, data-la irundhu kathukitta oru formula.
+Linear Regression, points-oda nadula oru straight line poduthu; andha line vachu pudhu value-va predict pannum.
+fit-na model-ku kathukudukkaradhu, predict-na kathukitta pinnadi answer solradhu.
+
+#code#
+from sklearn.linear_model import LinearRegression
+
+X = data[["hours_studied"]]   # input (features)
+y = data["marks"]             # answer (target)
+
+model = LinearRegression()
+model.fit(X, y)
+
+print("Marks for 7 hours:", model.predict(pd.DataFrame({"hours_studied": [7]}))[0].round(1))
+#/code#
+
+Intha model oru straight line-a kathukitturukku. Slope-na, oru extra hour-ku evlo marks yerudhu-nnu sollum.
+
+#code#
+print("Each extra hour adds about", round(model.coef_[0], 2), "marks")
+print("Starting marks:", round(model.intercept_, 2))
+#/code#
