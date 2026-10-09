@@ -22,6 +22,7 @@ const TYPE_MS_PER_CHAR = 30;
 const SETTLE_MS = Number(process.env.TUTOR_SETTLE_MS) || 700;
 // After "what is your doubt?" / "is it clear?", how long to wait for the student's reply.
 const AIDS_CLOSE_MS = (Number(process.env.TUTOR_AIDS_CLOSE_SEC) || 8) * 1000;
+const STAGE_DOUBT_WAIT_MS = (Number(process.env.TUTOR_STAGE_DOUBT_WAIT_SEC) || 10) * 1000; // VS Code / Jupyter stays open this long for doubts
 const FOLLOWUP_MS = (Number(process.env.TUTOR_FOLLOWUP_WAIT_SEC) || 15) * 1000;
 
 class Tutor {
@@ -242,7 +243,7 @@ class Tutor {
       // A further doubt keeps it open (answered next round); "ok / yes / no doubt" (RESOLVED), silence or
       // an unrelated remark closes it and the lesson carries on.
       let kept = false;
-      if (aidsOpen()) {
+      if (aidsOpen() && !this.stageOpen) { // while a code stage waits for doubts, teachCodeOnStage decides when to close
         if (this.awaiting && !this.questions.length) await this.waitForStudent(AIDS_CLOSE_MS);
         kept = this.awaiting && this.questions.length > 0;
         if (!kept) await closeAids();
@@ -389,8 +390,18 @@ class Tutor {
       await this.speak(toChunks(ask), { retry: false });
     }
     this.awaiting = "confirm";
-    await this.waitForStudent(DOUBT_WAIT_MS);
-    if (this.questions.length) await this.drain(); // a doubt: explained step by step / with a new example, then 8s again
+    // Stay on VS Code / Jupyter for 10s; every doubt asked is answered (and the window waits another 10s after each
+    // answer) - it closes only after the student has been silent for the full wait.
+    this.stageOpen = true;
+    try {
+      await this.waitForStudent(STAGE_DOUBT_WAIT_MS);
+      while (this.questions.length && !this.aborted) {
+        await this.drain();
+        await this.waitForStudent(STAGE_DOUBT_WAIT_MS);
+      }
+    } finally {
+      this.stageOpen = false;
+    }
     if (!this.questions.length) this.awaiting = null; // silence = resolved
     await this.closeStage();
   }

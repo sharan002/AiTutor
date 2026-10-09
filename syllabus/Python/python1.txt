@@ -1,5 +1,5 @@
 @title: Python for Beginners
-@language: en-IN
+@language: ta-IN
 @code: python
 @instructions: Be encouraging. Use everyday analogies. Keep sentences short.
 

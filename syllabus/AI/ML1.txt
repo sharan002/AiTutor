@@ -1,5 +1,5 @@
 @title: Introduction to AI and Machine Learning
-@language: en-IN
+@language: ta-IN
 @code: python
 @run: jupyter
 @instructions: Be encouraging. Use everyday analogies. Keep sentences short. The code runs in a Jupyter notebook, so each cell builds on the cells above it.

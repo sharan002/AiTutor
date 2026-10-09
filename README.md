@@ -11,7 +11,7 @@ npm run login                              # once: sign in the trainer's Google 
 npm run preview -- python1                 # try a lesson without Meet: open http://localhost:7100/?local=1
 npm run teach -- https://meet.google.com/hhs-yvpi-ywe python1
 npm run teach -- https://meet.google.com/vwy-zfmx-miv ML1             # an AI class (runs in Jupyter)
-npm run teach -- https://meet.google.com/zwg-dmeo-hkb python1 -- --restart   # ignore saved progress, start from block 1
+npm run teach -- https://meet.google.com/kyw-szje-hva ML1 -- --restart   # ignore saved progress, start from block 1
 ```
 
 Reads `../.env` (Sarvam keys etc. - same as before). Needs Chrome, plus whatever compilers/interpreters your
